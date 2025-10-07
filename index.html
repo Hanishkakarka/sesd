@@ -1,60 +1,134 @@
+// server/server.js
+    currency: 'INR',
+    customer,
+    payment: { method: paymentMethod, txnId: payment.txnId },
+    shipmentId,
+    status: 'Confirmed',
+    createdAt: new Date().toISOString()
+  };
+
+  db.orders[orderId] = order;
+  db.shipments[shipmentId] = { id: shipmentId, orderId, status: 'Processing', history: [{ status: 'Processing', at: new Date().toISOString() }] };
+
+  res.status(201).json({ orderId, shipmentId });
+});
+
+// Get an order by ID
+app.get('/api/orders/:id', (req, res) => {
+  const o = db.orders[req.params.id];
+  if (!o) return res.status(404).json({ error: 'Order not found' });
+  res.json(o);
+});
+
+// List orders by customer email (simple order history by email)
+app.get('/api/orders', (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).json({ error: 'Provide email query param' });
+  const list = Object.values(db.orders).filter(o => o.customer && o.customer.email === email);
+  res.json(list);
+});
+
+// --- Shipments ---
+app.get('/api/shipments/:id', (req, res) => {
+  const s = db.shipments[req.params.id];
+  if (!s) return res.status(404).json({ error: 'Shipment not found' });
+  res.json(s);
+});
+
+app.post('/api/shipments/:id/advance', (req, res) => {
+  const s = db.shipments[req.params.id];
+  if (!s) return res.status(404).json({ error: 'Shipment not found' });
+  s.status = nextShipmentStatus(s.status);
+  s.history.push({ status: s.status, at: new Date().toISOString() });
+  res.json(s);
+});
+
+function nextShipmentStatus(current) {
+  const lifecycle = ['Processing', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered'];
+  const idx = lifecycle.indexOf(current);
+  return idx < lifecycle.length - 1 ? lifecycle[idx+1] : current;
+}
+
+function mockProcessPayment(method, amount) {
+  // Simulate success; in production integrate with a gateway
+  return { success: true, txnId: 'txn_' + Math.random().toString(36).slice(2,9) };
+}
+
+// health
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+app.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
+// server/data.js
+exports.initialProducts = [
+  { id: 'p1', name: 'Classic T‑Shirt', price: 299, stock: 20, description: 'Comfortable cotton t-shirt, available in multiple sizes.' },
+  { id: 'p2', name: 'Ceramic Coffee Mug', price: 149, stock: 35, description: '350ml mug — dishwasher safe.' },
+  { id: 'p3', name: 'A5 Notebook', price: 199, stock: 10, description: '120-page ruled notebook for notes and sketches.' },
+  { id: 'p4', name: 'Wireless Earbuds', price: 1299, stock: 5, description: 'Bluetooth earbuds with charging case.' },
+  { id: 'p5', name: 'Stainless Water Bottle', price: 499, stock: 15, description: '750ml double-wall insulated bottle.' }
+];
 <!doctype html>
-          <p class="text-gray-500">Stock: ${p.stock}</p>
+
+      <div class="flex items-center space-x-4">
+        <input id="search" placeholder="Search products..." class="border rounded p-2" />
+        <button id="ordersBtn" class="text-sm px-3 py-2">Order History</button>
+        <button id="trackBtnTop" class="text-sm px-3 py-2">Track</button>
+        <button id="cartToggle" class="bg-blue-600 text-white px-3 py-2 rounded">Cart (<span id="cartCount">0</span>)</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto p-6">
+    <section>
+      <h2 class="text-2xl font-semibold mb-4">Products</h2>
+      <div id="products" class="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
+    </section>
+
+    <section class="mt-12 bg-white p-6 rounded shadow">
+      <h3 class="text-lg font-semibold mb-2">Quick Actions</h3>
+      <div class="flex flex-col sm:flex-row gap-3">
+        <div class="flex-1">
+          <label class="block text-sm text-gray-600">Order History (by email)</label>
+          <div class="flex gap-2 mt-1">
+            <input id="historyEmail" class="flex-1 border p-2 rounded" placeholder="you@example.com" />
+            <button id="historyBtn" class="bg-indigo-600 text-white px-4 rounded">Fetch</button>
+          </div>
+          <pre id="historyResult" class="mt-3 bg-gray-100 p-3 rounded text-sm"></pre>
         </div>
-        <div class="mt-3">
-          <input type="number" id="qty_${p.id}" min="0" value="0" class="border p-1 w-16 rounded text-center" />
-          <button class="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 mt-2 w-full" onclick="addToCart('${p.id}')">Add to Cart</button>
-        </div>`;
-      container.appendChild(card);
-    });
-  }
+        <div class="w-full sm:w-1/3">
+          <label class="block text-sm text-gray-600">Track Shipment</label>
+          <div class="flex gap-2 mt-1">
+            <input id="trackId" class="flex-1 border p-2 rounded" placeholder="shipment id" />
+            <button id="trackBtn" class="bg-green-600 text-white px-4 rounded">Track</button>
+          </div>
+          <pre id="trackResult" class="mt-3 bg-gray-100 p-3 rounded text-sm"></pre>
+        </div>
+      </div>
+    </section>
+  </main>
 
-  function addToCart(id){
-    const qty = parseInt(document.getElementById(`qty_${id}`).value) || 0;
-    if(qty <= 0) return alert('Please enter a valid quantity.');
-    cart[id] = (cart[id] || 0) + qty;
-    updateCart();
-  }
+  <!-- Cart sidebar -->
+  <aside id="cartSidebar" class="fixed right-4 top-20 w-96 bg-white shadow-lg rounded-lg p-4 hidden">
+    <h4 class="font-semibold">Your Cart</h4>
+    <div id="cartItems" class="cart-scroll mt-3 space-y-3"></div>
+    <div class="mt-4">
+      <div class="flex justify-between items-center"><b>Total:</b><span id="cartTotal">₹0</span></div>
+      <button id="checkoutBtn" class="mt-3 w-full bg-blue-600 text-white py-2 rounded">Checkout</button>
+    </div>
+  </aside>
 
-  function updateCart(){
-    const preview = document.getElementById('cartPreview');
-    const lines = Object.keys(cart).map(id => {
-      const p = products.find(x => x.id === id);
-      return `${p.name} × ${cart[id]} = ₹${p.price * cart[id]}`;
-    });
-    preview.textContent = lines.join('\n') || 'Cart is empty';
-  }
+  <!-- Product Modal -->
+  <div id="modal" class="fixed inset-0 bg-black bg-opacity-40 hidden items-center justify-center">
+    <div class="bg-white rounded-lg p-6 w-11/12 max-w-2xl">
+      <button id="modalClose" class="float-right text-gray-500">✕</button>
+      <div id="modalContent"></div>
+    </div>
+  </div>
 
-  document.getElementById('orderForm').addEventListener('submit', async e => {
-    e.preventDefault();
-    if(Object.keys(cart).length === 0) return alert('Cart is empty!');
-    const name = document.getElementById('name').value;
-    const email = document.getElementById('email').value;
-    const items = Object.keys(cart).map(id => ({ productId: id, qty: cart[id] }));
-    const res = await fetch(`${API}/orders`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ items, customer: { name, email }, paymentMethod: 'mock' })
-    });
-    if(!res.ok) return alert('Order failed: ' + (await res.json()).error);
-    const j = await res.json();
-    alert(`✅ Order placed!\nOrder ID: ${j.orderId}\nShipment ID: ${j.shipmentId}`);
-    Object.keys(cart).forEach(k => delete cart[k]);
-    updateCart();
-    loadProducts();
-  });
-
-  document.getElementById('trackBtn').addEventListener('click', async ()=>{
-    const id = document.getElementById('trackId').value.trim();
-    if(!id) return alert('Enter a shipment ID');
-    const res = await fetch(`${API}/shipments/${id}`);
-    const result = document.getElementById('trackResult');
-    if(!res.ok) return result.textContent = '❌ Shipment not found.';
-    const data = await res.json();
-    result.textContent = JSON.stringify(data, null, 2);
-  });
-
-  loadProducts();
-  </script>
-</body>
-</html>
+  <!-- Checkout modal -->
+  <div id="checkoutModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center">
+    <div class="bg-white rounded-lg p-6 w-11/12 max-w-xl">
+      <h3 class="text-lg font-semibold mb-3">Checkout</h3>
+      <form id="checkoutForm" class="space-y-3">
+        <input id="c_name" required placeholder="Full name" class="w-full border p-2 rounded" />
+        <input id="c_email" required type="email" placeholder="Email" class="w-full border p-2 rounded" />
+        <input id="c_address" placeholder="Shipping address" class="w-full border p-2
