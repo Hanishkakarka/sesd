@@ -1,171 +1,60 @@
-const express = require('express');
-
-  // Create order
-  const orderId = uuidv4();
-  const shipmentId = uuidv4();
-  const order = {
-    id: orderId,
-    items: lineItems,
-    total,
-    customer,
-    payment: { method: paymentMethod, transactionId: paymentResult.txnId },
-    shipmentId,
-    status: 'Confirmed',
-    createdAt: new Date().toISOString()
-  };
-  db.orders[orderId] = order;
-
-  // Create shipment (initial state: Processing)
-  db.shipments[shipmentId] = {
-    id: shipmentId,
-    orderId,
-    status: 'Processing',
-    history: [{ status: 'Processing', at: new Date().toISOString() }]
-  };
-
-  res.status(201).json({ orderId, shipmentId });
-});
-
-app.get('/api/orders/:id', (req, res) => {
-  const o = db.orders[req.params.id];
-  if (!o) return res.status(404).json({ error: 'Order not found' });
-  res.json(o);
-});
-
-// --- Shipment tracking ---
-app.get('/api/shipments/:id', (req, res) => {
-  const s = db.shipments[req.params.id];
-  if (!s) return res.status(404).json({ error: 'Shipment not found' });
-  res.json(s);
-});
-
-// Mock payment: accepts anything and returns success
-function mockProcessPayment(method, amount) {
-  // In production integrate with a payment gateway SDK (Stripe/PayPal/Razorpay etc.)
-  return { success: true, txnId: 'txn_' + Math.random().toString(36).slice(2,9) };
-}
-
-// Mock shipment progression endpoint to move shipment through states (admin only in real app)
-app.post('/api/shipments/:id/advance', (req, res) => {
-  const s = db.shipments[req.params.id];
-  if (!s) return res.status(404).json({ error: 'Shipment not found' });
-  const next = nextShipmentStatus(s.status);
-  s.status = next;
-  s.history.push({ status: next, at: new Date().toISOString() });
-  res.json(s);
-});
-
-function nextShipmentStatus(current) {
-  const lifecycle = ['Processing', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered'];
-  const idx = lifecycle.indexOf(current);
-  return idx < lifecycle.length - 1 ? lifecycle[idx+1] : current;
-}
-
-// simple health
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
-
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
 <!doctype html>
-  <h2>Place Order</h2>
-  <form id="orderForm">
-    <label>Name: <input id="name" required /></label><br />
-    <label>Email: <input id="email" type="email" required /></label><br />
-    <div id="cartPreview"></div>
-    <button type="submit">Place Order</button>
-  </form>
-  <hr />
-  <h2>Track Shipment</h2>
-  <input id="trackId" placeholder="Shipment ID" /> <button id="trackBtn">Track</button>
-  <pre id="trackResult"></pre>
-
-<script>
-const API = 'http://localhost:4000/api';
-let products = [];
-const cart = {};
-
-async function loadProducts(){
-  const r = await fetch(API + '/products');
-  products = await r.json();
-  renderProducts();
-}
-
-function renderProducts(){
-  const out = document.getElementById('products');
-  out.innerHTML = '';
-  for(const p of products){
-    const div = document.createElement('div'); div.className='prod';
-    div.innerHTML = `<b>${p.name}</b> — ₹${p.price} <br/>Stock: ${p.stock} <br/>Qty: <input type='number' min='0' value='0' id='qty_${p.id}' style='width:60px'/> <button data-id='${p.id}'>Add</button>`;
-    out.appendChild(div);
+          <p class="text-gray-500">Stock: ${p.stock}</p>
+        </div>
+        <div class="mt-3">
+          <input type="number" id="qty_${p.id}" min="0" value="0" class="border p-1 w-16 rounded text-center" />
+          <button class="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 mt-2 w-full" onclick="addToCart('${p.id}')">Add to Cart</button>
+        </div>`;
+      container.appendChild(card);
+    });
   }
-  out.querySelectorAll('button[data-id]').forEach(b=>b.addEventListener('click', ()=>{
-    const id=b.dataset.id; const q=document.getElementById('qty_'+id).value|0;
-    if(q>0){ cart[id]=(cart[id]||0)+q; updateCart(); }
-  }));
-}
 
-function updateCart(){
-  const preview = document.getElementById('cartPreview');
-  const lines = [];
-  for(const id in cart){
-    const p = products.find(x=>x.id===id);
-    lines.push(`${p.name} x ${cart[id]} = ₹${p.price * cart[id]}`);
+  function addToCart(id){
+    const qty = parseInt(document.getElementById(`qty_${id}`).value) || 0;
+    if(qty <= 0) return alert('Please enter a valid quantity.');
+    cart[id] = (cart[id] || 0) + qty;
+    updateCart();
   }
-  preview.innerText = lines.join('\n') || 'Cart empty';
-}
 
-document.getElementById('orderForm').addEventListener('submit', async (ev)=>{
-  ev.preventDefault();
-  const name = document.getElementById('name').value;
-  const email = document.getElementById('email').value;
-  const items = Object.keys(cart).map(id=>({ productId: id, qty: cart[id] }));
-  const res = await fetch(API + '/orders', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({items, customer:{name,email}, paymentMethod:'mock'})});
-  if(!res.ok){ alert('Order failed: ' + (await res.json()).error); return; }
-  const j = await res.json();
-  alert('Order placed!\nOrder ID: ' + j.orderId + '\nShipment ID: ' + j.shipmentId);
-  Object.keys(cart).forEach(k=>delete cart[k]); updateCart(); loadProducts();
-});
+  function updateCart(){
+    const preview = document.getElementById('cartPreview');
+    const lines = Object.keys(cart).map(id => {
+      const p = products.find(x => x.id === id);
+      return `${p.name} × ${cart[id]} = ₹${p.price * cart[id]}`;
+    });
+    preview.textContent = lines.join('\n') || 'Cart is empty';
+  }
 
-document.getElementById('trackBtn').addEventListener('click', async ()=>{
-  const id=document.getElementById('trackId').value.trim(); if(!id) return;
-  const r = await fetch(API + '/shipments/' + id);
-  const out = document.getElementById('trackResult');
-  if(!r.ok){ out.innerText='Shipment not found'; return; }
-  const j = await r.json(); out.innerText = JSON.stringify(j, null, 2);
-});
+  document.getElementById('orderForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    if(Object.keys(cart).length === 0) return alert('Cart is empty!');
+    const name = document.getElementById('name').value;
+    const email = document.getElementById('email').value;
+    const items = Object.keys(cart).map(id => ({ productId: id, qty: cart[id] }));
+    const res = await fetch(`${API}/orders`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ items, customer: { name, email }, paymentMethod: 'mock' })
+    });
+    if(!res.ok) return alert('Order failed: ' + (await res.json()).error);
+    const j = await res.json();
+    alert(`✅ Order placed!\nOrder ID: ${j.orderId}\nShipment ID: ${j.shipmentId}`);
+    Object.keys(cart).forEach(k => delete cart[k]);
+    updateCart();
+    loadProducts();
+  });
 
-loadProducts();
-</script>
+  document.getElementById('trackBtn').addEventListener('click', async ()=>{
+    const id = document.getElementById('trackId').value.trim();
+    if(!id) return alert('Enter a shipment ID');
+    const res = await fetch(`${API}/shipments/${id}`);
+    const result = document.getElementById('trackResult');
+    if(!res.ok) return result.textContent = '❌ Shipment not found.';
+    const data = await res.json();
+    result.textContent = JSON.stringify(data, null, 2);
+  });
+
+  loadProducts();
+  </script>
 </body>
 </html>
-@startuml
-!define ICONURL https://raw.githubusercontent.com/tupadr3/plantuml-icon-font-sprites/v2.1
-skinparam dpi 150
-node "Client (Browser)" as Browser
-node "Web Server (NGINX)" as WebServer
-node "Application Server (Node.js/Express)" as AppServer
-node "Database (MongoDB / Postgres)" as Database
-node "Payment Gateway (External)" as Payment
-node "Shipment Provider (External)" as Carrier
-
-Browser --> WebServer : HTTPS (static files + API reverse proxy)
-WebServer --> AppServer : HTTP (forward /api)
-AppServer --> Database : DB queries (read/write)
-AppServer --> Payment : HTTPS (payment requests)
-AppServer --> Carrier : HTTPS (shipment creation & tracking webhooks)
-
-@enduml
-# Server
-cd server
-npm init -y
-npm i express body-parser uuid
-# (optionally) npm i cors
-node server.js
-# from project root
-git init
-git add .
-git commit -m "Initial client-server mini e-commerce example"
-# create a new repo on GitHub (via website) named `mini-ecommerce`
-# then push (example):
-git remote add origin https://github.com/YOUR_USERNAME/mini-ecommerce.git
-git branch -M main
-git push -u origin main
